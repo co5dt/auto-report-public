@@ -1,0 +1,27 @@
+PROJ-128530, PROJ-128531
+The GBA-V bevraging for category 08 returns stale data when the PL has been updated within the last 24h. Root cause is a cache invalidation bug in the Dataslice query layer.
+
+- After PL update, subsequent GBA-V query returns fresh data
+- Cache TTL respects the configured invalidation window
+- Existing queries for non-updated PLs are unaffected
+
+y
+n
+n
+n
+n
+n
+n
+n
+Verified on local environment that after PL update for BSN 999990019, GBA-V query returns updated category 08 within 5s.
+Ran existing integration test suite — all green.
+
+y
+142 passed, 0 failed
+78%
+y
+n
+n
+n
+y
+5.13.0

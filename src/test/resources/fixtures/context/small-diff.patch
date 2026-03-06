@@ -1,0 +1,65 @@
+diff --git a/src/main/java/nl/example/cache/PlCache.java b/src/main/java/nl/example/cache/PlCache.java
+--- a/src/main/java/nl/example/cache/PlCache.java
++++ b/src/main/java/nl/example/cache/PlCache.java
+@@ -42,6 +42,15 @@ public class PlCache {
+     private final Map<String, CacheEntry> entries;
++    public void invalidate(String bsn) {
++        entries.remove(bsn);
++        log.info("Cache invalidated for BSN {}", bsn);
++    }
++
++    public void refreshEntry(String bsn, PlData data) {
++        entries.put(bsn, new CacheEntry(data, Instant.now()));
++    }
+ 
+@@ -60,7 +69,10 @@ public class PlCache {
+     public Optional<PlData> get(String bsn) {
+-        return Optional.ofNullable(entries.get(bsn))
+-                .map(CacheEntry::data);
++        CacheEntry entry = entries.get(bsn);
++        if (entry != null && entry.isExpired()) {
++            entries.remove(bsn);
++            return Optional.empty();
++        }
++        return Optional.ofNullable(entry).map(CacheEntry::data);
+     }
+diff --git a/src/test/java/nl/example/cache/PlCacheTest.java b/src/test/java/nl/example/cache/PlCacheTest.java
+--- /dev/null
++++ b/src/test/java/nl/example/cache/PlCacheTest.java
+@@ -0,0 +1,35 @@
++package nl.example.cache;
++
++import org.junit.jupiter.api.Test;
++import static org.assertj.core.api.Assertions.assertThat;
++
++class PlCacheTest {
++
++    @Test
++    void invalidateShouldRemoveEntry() {
++        var cache = new PlCache();
++        cache.put("123", new PlData("test"));
++        cache.invalidate("123");
++        assertThat(cache.get("123")).isEmpty();
++    }
++
++    @Test
++    void refreshEntryShouldUpdateData() {
++        var cache = new PlCache();
++        cache.put("456", new PlData("old"));
++        cache.refreshEntry("456", new PlData("new"));
++        assertThat(cache.get("456")).isPresent();
++    }
++
++    @Test
++    void expiredEntryShouldBeRemoved() {
++        var cache = new PlCache();
++        cache.put("789", new PlData("stale"));
++        // simulate expiry
++        assertThat(cache.get("789")).isPresent();
++    }
++
++    @Test
++    void getReturnsEmptyForUnknownKey() {
++        assertThat(new PlCache().get("unknown")).isEmpty();
++    }
++}

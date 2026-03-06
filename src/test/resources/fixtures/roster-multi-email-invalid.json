@@ -1,0 +1,17 @@
+{
+  "teams": {
+    "TeamA": {
+      "members": [
+        {
+          "name": "No Emails",
+          "emails": [],
+          "role": "BE"
+        },
+        {
+          "name": "Also No Email",
+          "role": "TE"
+        }
+      ]
+    }
+  }
+}

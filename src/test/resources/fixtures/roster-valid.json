@@ -1,0 +1,27 @@
+{
+  "teams": {
+    "Team Alpha": {
+      "products": [
+        "MuniApp - BRP",
+        "MuniApp - Dashboard"
+      ],
+      "members": [
+        { "name": "Chris de Vries", "email": "c.devries@example.nl", "role": "BE" },
+        { "name": "Martijn Janssen", "email": "m.janssen@example.nl", "role": "TE" },
+        { "name": "Thomas Smit", "email": "t.smit@example.nl", "role": "BI" }
+      ]
+    },
+    "Team Beta": {
+      "products": [
+        "MuniPortal - Core"
+      ],
+      "members": [
+        { "name": "Alice Tester", "email": "a.tester@example.nl", "role": "Tester" },
+        { "name": "Bob Builder", "email": "b.builder@example.nl", "role": "BE" }
+      ]
+    }
+  },
+  "repo_mapping": {
+    "muniapp-brp": { "team": "Team Alpha", "product": "MuniApp - BRP" }
+  }
+}

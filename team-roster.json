@@ -1,0 +1,25 @@
+{
+  "teams": {
+    "Team Alpha": {
+      "products": [
+        "MuniApp - BRP",
+        "MuniApp - Dashboard",
+        "MuniApp - Rapportage",
+        "MuniApp - Proces",
+        "MuniApp - Protocollering"
+      ],
+      "members": [
+        { "name": "Alex van den Berg", "email": "a.vandenberg@example.nl", "emails": ["a.vandenberg@example.nl", "alex@personal.dev"], "role": "lead" },
+        { "name": "Chris de Vries", "email": "c.devries@example.nl", "emails": ["c.devries@example.nl", "chris.devries@external.org"], "role": "BE" },
+        { "name": "Martijn Janssen", "email": "m.janssen@example.nl", "role": "TE" },
+        { "name": "Thomas Smit", "email": "t.smit@example.nl", "role": "BI" },
+        { "name": "Stefan Bakker", "email": "s.bakker@example.nl", "role": "TE" },
+        { "name": "Sam Visser", "email": "s.visser@example.nl", "role": "TE" }
+      ]
+    }
+  },
+  "repo_mapping": {
+    "muniapp-brp": { "team": "Team Alpha", "product": "MuniApp - BRP" },
+    "muniapp-dashboard": { "team": "Team Alpha", "product": "MuniApp - Dashboard" }
+  }
+}

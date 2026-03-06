@@ -1,0 +1,548 @@
+diff --git a/migrations/V42__add_cache_ttl_column.sql b/migrations/V42__add_cache_ttl_column.sql
+--- /dev/null
++++ b/migrations/V42__add_cache_ttl_column.sql
+@@ -0,0 +1,5 @@
++ALTER TABLE pl_cache ADD COLUMN ttl_seconds INTEGER DEFAULT 86400;
++CREATE INDEX idx_pl_cache_ttl ON pl_cache(ttl_seconds);
++UPDATE pl_cache SET ttl_seconds = 86400 WHERE ttl_seconds IS NULL;
++ALTER TABLE pl_cache ALTER COLUMN ttl_seconds SET NOT NULL;
++COMMENT ON COLUMN pl_cache.ttl_seconds IS 'Cache TTL in seconds';
+diff --git a/src/main/java/nl/example/cache/PlCache.java b/src/main/java/nl/example/cache/PlCache.java
+--- a/src/main/java/nl/example/cache/PlCache.java
++++ b/src/main/java/nl/example/cache/PlCache.java
+@@ -1,6 +1,8 @@
+ package nl.example.cache;
+ 
++import java.time.Duration;
+ import java.time.Instant;
++import java.util.Objects;
+ import java.util.Map;
+ import java.util.Optional;
+ import java.util.concurrent.ConcurrentHashMap;
+@@ -10,10 +12,42 @@ public class PlCache {
+ 
+     private static final Logger log = LoggerFactory.getLogger(PlCache.class);
+     private final Map<String, CacheEntry> entries = new ConcurrentHashMap<>();
++    private final Duration ttl;
++
++    public PlCache() {
++        this(Duration.ofSeconds(86400));
++    }
++
++    public PlCache(Duration ttl) {
++        this.ttl = Objects.requireNonNull(ttl);
++    }
+ 
+     public void put(String bsn, PlData data) {
+         entries.put(bsn, new CacheEntry(data, Instant.now()));
++        log.debug("Cached entry for BSN {} with TTL {}s", bsn, ttl.toSeconds());
++    }
++
++    public void invalidate(String bsn) {
++        entries.remove(bsn);
++        log.info("Cache invalidated for BSN {}", bsn);
++    }
++
++    public void invalidateAll() {
++        int size = entries.size();
++        entries.clear();
++        log.info("Cache cleared: {} entries removed", size);
++    }
++
++    public void refreshEntry(String bsn, PlData data) {
++        entries.put(bsn, new CacheEntry(data, Instant.now()));
++        log.debug("Cache refreshed for BSN {}", bsn);
+     }
+ 
+     public Optional<PlData> get(String bsn) {
+-        return Optional.ofNullable(entries.get(bsn))
+-                .map(CacheEntry::data);
++        CacheEntry entry = entries.get(bsn);
++        if (entry == null) {
++            return Optional.empty();
++        }
++        if (isExpired(entry)) {
++            entries.remove(bsn);
++            log.debug("Expired cache entry removed for BSN {}", bsn);
++            return Optional.empty();
++        }
++        return Optional.of(entry.data());
++    }
++
++    public int size() {
++        return entries.size();
++    }
++
++    private boolean isExpired(CacheEntry entry) {
++        return Duration.between(entry.timestamp(), Instant.now()).compareTo(ttl) > 0;
+     }
+ 
+-    private record CacheEntry(PlData data, Instant timestamp) {}
++    private record CacheEntry(PlData data, Instant timestamp) {
++        CacheEntry {
++            Objects.requireNonNull(data);
++            Objects.requireNonNull(timestamp);
++        }
++    }
+ }
+diff --git a/src/main/java/nl/example/query/GbaVQueryHandler.java b/src/main/java/nl/example/query/GbaVQueryHandler.java
+--- a/src/main/java/nl/example/query/GbaVQueryHandler.java
++++ b/src/main/java/nl/example/query/GbaVQueryHandler.java
+@@ -15,8 +15,15 @@ public class GbaVQueryHandler {
+     private final PlCache cache;
+     private final GbaVClient client;
++    private final MetricsCollector metrics;
+ 
+-    public GbaVQueryHandler(PlCache cache, GbaVClient client) {
++    public GbaVQueryHandler(PlCache cache, GbaVClient client, MetricsCollector metrics) {
+         this.cache = cache;
+         this.client = client;
++        this.metrics = metrics;
++    }
++
++    public QueryResult query(String bsn, Category category) {
++        metrics.increment("gba_v_query_total");
++        return doQuery(bsn, category);
+     }
+ 
+     public QueryResult doQuery(String bsn, Category category) {
+@@ -25,6 +32,8 @@ public class GbaVQueryHandler {
+         if (cached.isPresent()) {
++            metrics.increment("gba_v_cache_hit");
+             return QueryResult.fromCache(cached.get());
+         }
++        metrics.increment("gba_v_cache_miss");
+         PlData fresh = client.fetch(bsn, category);
+         cache.put(bsn, fresh);
+         return QueryResult.fromFresh(fresh);
+@@ -35,4 +44,12 @@ public class GbaVQueryHandler {
+     public void clearCache() {
+-        // no-op for now
++        cache.invalidateAll();
++        metrics.increment("gba_v_cache_clear");
++        log.info("Query handler cache cleared");
++    }
++
++    public void refreshBsn(String bsn) {
++        PlData fresh = client.fetch(bsn, Category.ALL);
++        cache.refreshEntry(bsn, fresh);
++        metrics.increment("gba_v_cache_refresh");
+     }
+ }
+diff --git a/src/main/java/nl/example/auth/TokenValidator.java b/src/main/java/nl/example/auth/TokenValidator.java
+--- a/src/main/java/nl/example/auth/TokenValidator.java
++++ b/src/main/java/nl/example/auth/TokenValidator.java
+@@ -8,10 +8,25 @@ public class TokenValidator {
+     private final JwtParser parser;
++    private final Set<String> revokedTokens = ConcurrentHashMap.newKeySet();
+ 
+     public TokenValidator(JwtParser parser) {
+         this.parser = parser;
+     }
+ 
+     public boolean validate(String token) {
++        if (revokedTokens.contains(token)) {
++            log.warn("Revoked token presented");
++            return false;
++        }
+         try {
+             parser.parseClaimsJws(token);
+             return true;
+@@ -20,4 +35,18 @@ public class TokenValidator {
+             return false;
+         }
+     }
++
++    public void revokeToken(String token) {
++        revokedTokens.add(token);
++        log.info("Token revoked");
++    }
++
++    public boolean isRevoked(String token) {
++        return revokedTokens.contains(token);
++    }
++
++    public void clearRevocationList() {
++        revokedTokens.clear();
++        log.info("Revocation list cleared");
++    }
+ }
+diff --git a/src/main/java/nl/example/config/CacheConfig.java b/src/main/java/nl/example/config/CacheConfig.java
+--- /dev/null
++++ b/src/main/java/nl/example/config/CacheConfig.java
+@@ -0,0 +1,18 @@
++package nl.example.config;
++
++import java.time.Duration;
++
++public record CacheConfig(
++        Duration ttl,
++        int maxEntries,
++        boolean enableMetrics
++) {
++    public static CacheConfig defaults() {
++        return new CacheConfig(Duration.ofSeconds(86400), 10000, true);
++    }
++
++    public CacheConfig withTtl(Duration ttl) {
++        return new CacheConfig(ttl, maxEntries, enableMetrics);
++    }
++}
+diff --git a/src/main/java/nl/example/model/QueryResult.java b/src/main/java/nl/example/model/QueryResult.java
+--- a/src/main/java/nl/example/model/QueryResult.java
++++ b/src/main/java/nl/example/model/QueryResult.java
+@@ -5,9 +5,15 @@ public record QueryResult(
+         PlData data,
+-        boolean fromCache
++        boolean fromCache,
++        Instant timestamp
+ ) {
+     public static QueryResult fromCache(PlData data) {
+-        return new QueryResult(data, true);
++        return new QueryResult(data, true, Instant.now());
+     }
+     public static QueryResult fromFresh(PlData data) {
+-        return new QueryResult(data, false);
++        return new QueryResult(data, false, Instant.now());
++    }
++
++    public Duration age() {
++        return Duration.between(timestamp, Instant.now());
+     }
+ }
+diff --git a/src/main/java/nl/example/metrics/MetricsCollector.java b/src/main/java/nl/example/metrics/MetricsCollector.java
+--- /dev/null
++++ b/src/main/java/nl/example/metrics/MetricsCollector.java
+@@ -0,0 +1,30 @@
++package nl.example.metrics;
++
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.AtomicLong;
++
++public class MetricsCollector {
++
++    private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
++
++    public void increment(String name) {
++        counters.computeIfAbsent(name, k -> new AtomicLong()).incrementAndGet();
++    }
++
++    public long get(String name) {
++        AtomicLong counter = counters.get(name);
++        return counter != null ? counter.get() : 0;
++    }
++
++    public Map<String, Long> snapshot() {
++        var result = new java.util.TreeMap<String, Long>();
++        counters.forEach((k, v) -> result.put(k, v.get()));
++        return result;
++    }
++
++    public void reset() {
++        counters.clear();
++    }
++}
+diff --git a/src/main/java/nl/example/event/CacheEventPublisher.java b/src/main/java/nl/example/event/CacheEventPublisher.java
+--- /dev/null
++++ b/src/main/java/nl/example/event/CacheEventPublisher.java
+@@ -0,0 +1,42 @@
++package nl.example.event;
++
++import java.util.List;
++import java.util.concurrent.CopyOnWriteArrayList;
++import java.util.function.Consumer;
++
++public class CacheEventPublisher {
++
++    public enum EventType { INVALIDATE, REFRESH, CLEAR, EXPIRE }
++
++    public record CacheEvent(EventType type, String key, String detail) {}
++
++    private final List<Consumer<CacheEvent>> listeners = new CopyOnWriteArrayList<>();
++
++    public void subscribe(Consumer<CacheEvent> listener) {
++        listeners.add(listener);
++    }
++
++    public void unsubscribe(Consumer<CacheEvent> listener) {
++        listeners.remove(listener);
++    }
++
++    public void publish(CacheEvent event) {
++        for (Consumer<CacheEvent> listener : listeners) {
++            try {
++                listener.accept(event);
++            } catch (Exception e) {
++                // Swallow listener exceptions to avoid disrupting publisher
++            }
++        }
++    }
++
++    public void publishInvalidate(String key) {
++        publish(new CacheEvent(EventType.INVALIDATE, key, null));
++    }
++
++    public void publishRefresh(String key) {
++        publish(new CacheEvent(EventType.REFRESH, key, null));
++    }
++
++    public void publishClear() {
++        publish(new CacheEvent(EventType.CLEAR, null, "All entries cleared"));
++    }
++}
+diff --git a/src/main/java/nl/example/service/DataSliceService.java b/src/main/java/nl/example/service/DataSliceService.java
+--- a/src/main/java/nl/example/service/DataSliceService.java
++++ b/src/main/java/nl/example/service/DataSliceService.java
+@@ -12,11 +12,30 @@ public class DataSliceService {
+     private final GbaVQueryHandler queryHandler;
+     private final AuditLogger auditLogger;
++    private final CacheEventPublisher eventPublisher;
++    private final FeatureFlags featureFlags;
+ 
+-    public DataSliceService(GbaVQueryHandler queryHandler, AuditLogger auditLogger) {
++    public DataSliceService(GbaVQueryHandler queryHandler, AuditLogger auditLogger,
++                            CacheEventPublisher eventPublisher, FeatureFlags featureFlags) {
+         this.queryHandler = queryHandler;
+         this.auditLogger = auditLogger;
++        this.eventPublisher = eventPublisher;
++        this.featureFlags = featureFlags;
+     }
+ 
+     public QueryResult lookup(String bsn, Category category, String userId) {
++        if (featureFlags.isEnabled("enhanced_cache_logging")) {
++            log.info("Lookup requested by {} for BSN {} category {}", userId, bsn, category);
++        }
+         auditLogger.log("LOOKUP", userId, bsn, category.name());
+-        return queryHandler.doQuery(bsn, category);
++        QueryResult result = queryHandler.query(bsn, category);
++        if (!result.fromCache()) {
++            eventPublisher.publishRefresh(bsn);
++        }
++        return result;
++    }
++
++    public void invalidateAndRefresh(String bsn, String userId) {
++        auditLogger.log("INVALIDATE_REFRESH", userId, bsn, "ALL");
++        queryHandler.refreshBsn(bsn);
++        eventPublisher.publishInvalidate(bsn);
++        log.info("BSN {} invalidated and refreshed by {}", bsn, userId);
+     }
+ }
+diff --git a/src/main/java/nl/example/service/FeatureFlags.java b/src/main/java/nl/example/service/FeatureFlags.java
+--- /dev/null
++++ b/src/main/java/nl/example/service/FeatureFlags.java
+@@ -0,0 +1,25 @@
++package nl.example.service;
++
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++
++public class FeatureFlags {
++
++    private final Map<String, Boolean> flags = new ConcurrentHashMap<>();
++
++    public boolean isEnabled(String flag) {
++        return flags.getOrDefault(flag, false);
++    }
++
++    public void enable(String flag) {
++        flags.put(flag, true);
++    }
++
++    public void disable(String flag) {
++        flags.put(flag, false);
++    }
++
++    public Map<String, Boolean> allFlags() {
++        return Map.copyOf(flags);
++    }
++}
+diff --git a/src/test/java/nl/example/cache/PlCacheTest.java b/src/test/java/nl/example/cache/PlCacheTest.java
+--- /dev/null
++++ b/src/test/java/nl/example/cache/PlCacheTest.java
+@@ -0,0 +1,85 @@
++package nl.example.cache;
++
++import org.junit.jupiter.api.Test;
++import java.time.Duration;
++import static org.assertj.core.api.Assertions.assertThat;
++
++class PlCacheTest {
++
++    @Test
++    void invalidateShouldRemoveEntry() {
++        var cache = new PlCache();
++        cache.put("123", new PlData("test"));
++        cache.invalidate("123");
++        assertThat(cache.get("123")).isEmpty();
++    }
++
++    @Test
++    void refreshEntryShouldUpdateData() {
++        var cache = new PlCache();
++        cache.put("456", new PlData("old"));
++        cache.refreshEntry("456", new PlData("new"));
++        assertThat(cache.get("456")).isPresent()
++                .hasValueSatisfying(d -> assertThat(d.value()).isEqualTo("new"));
++    }
++
++    @Test
++    void expiredEntryShouldBeRemoved() {
++        var cache = new PlCache(Duration.ofMillis(1));
++        cache.put("789", new PlData("stale"));
++        try { Thread.sleep(5); } catch (InterruptedException ignored) {}
++        assertThat(cache.get("789")).isEmpty();
++    }
++
++    @Test
++    void getReturnsEmptyForUnknownKey() {
++        assertThat(new PlCache().get("unknown")).isEmpty();
++    }
++
++    @Test
++    void invalidateAllClearsCache() {
++        var cache = new PlCache();
++        cache.put("a", new PlData("1"));
++        cache.put("b", new PlData("2"));
++        cache.invalidateAll();
++        assertThat(cache.size()).isZero();
++    }
++
++    @Test
++    void sizeShouldReturnEntryCount() {
++        var cache = new PlCache();
++        assertThat(cache.size()).isZero();
++        cache.put("x", new PlData("v"));
++        assertThat(cache.size()).isEqualTo(1);
++    }
++
++    @Test
++    void customTtlShouldBeRespected() {
++        var cache = new PlCache(Duration.ofHours(1));
++        cache.put("long", new PlData("lived"));
++        assertThat(cache.get("long")).isPresent();
++    }
++}
+diff --git a/src/test/java/nl/example/query/GbaVQueryHandlerTest.java b/src/test/java/nl/example/query/GbaVQueryHandlerTest.java
+--- a/src/test/java/nl/example/query/GbaVQueryHandlerTest.java
++++ b/src/test/java/nl/example/query/GbaVQueryHandlerTest.java
+@@ -10,12 +10,42 @@ class GbaVQueryHandlerTest {
+     @Test
+     void queryShouldReturnCachedResult() {
+-        var handler = new GbaVQueryHandler(cache, mockClient);
+-        handler.doQuery("123", Category.CAT08);
+-        var result = handler.doQuery("123", Category.CAT08);
++        var handler = new GbaVQueryHandler(cache, mockClient, metrics);
++        handler.query("123", Category.CAT08);
++        var result = handler.query("123", Category.CAT08);
+         assertThat(result.fromCache()).isTrue();
+     }
++
++    @Test
++    void queryShouldIncrementMetrics() {
++        var handler = new GbaVQueryHandler(cache, mockClient, metrics);
++        handler.query("123", Category.CAT08);
++        assertThat(metrics.get("gba_v_query_total")).isEqualTo(1);
++        assertThat(metrics.get("gba_v_cache_miss")).isEqualTo(1);
++        handler.query("123", Category.CAT08);
++        assertThat(metrics.get("gba_v_cache_hit")).isEqualTo(1);
++    }
++
++    @Test
++    void clearCacheShouldInvalidateAll() {
++        var handler = new GbaVQueryHandler(cache, mockClient, metrics);
++        handler.query("456", Category.CAT08);
++        handler.clearCache();
++        assertThat(metrics.get("gba_v_cache_clear")).isEqualTo(1);
++    }
++
++    @Test
++    void refreshBsnShouldFetchFreshData() {
++        var handler = new GbaVQueryHandler(cache, mockClient, metrics);
++        handler.refreshBsn("789");
++        assertThat(metrics.get("gba_v_cache_refresh")).isEqualTo(1);
++    }
+ }
+diff --git a/src/test/java/nl/example/service/DataSliceServiceTest.java b/src/test/java/nl/example/service/DataSliceServiceTest.java
+--- /dev/null
++++ b/src/test/java/nl/example/service/DataSliceServiceTest.java
+@@ -0,0 +1,45 @@
++package nl.example.service;
++
++import nl.example.cache.PlCache;
++import nl.example.event.CacheEventPublisher;
++import nl.example.query.GbaVQueryHandler;
++import org.junit.jupiter.api.Test;
++import static org.assertj.core.api.Assertions.assertThat;
++
++class DataSliceServiceTest {
++
++    @Test
++    void lookupShouldPublishRefreshEventOnCacheMiss() {
++        var publisher = new CacheEventPublisher();
++        var service = createService(publisher);
++        var events = new java.util.ArrayList<CacheEventPublisher.CacheEvent>();
++        publisher.subscribe(events::add);
++        service.lookup("123", Category.CAT08, "user1");
++        assertThat(events).hasSize(1);
++        assertThat(events.get(0).type()).isEqualTo(CacheEventPublisher.EventType.REFRESH);
++    }
++
++    @Test
++    void invalidateAndRefreshShouldAuditLog() {
++        var publisher = new CacheEventPublisher();
++        var service = createService(publisher);
++        var events = new java.util.ArrayList<CacheEventPublisher.CacheEvent>();
++        publisher.subscribe(events::add);
++        service.invalidateAndRefresh("456", "admin");
++        assertThat(events).hasSize(1);
++        assertThat(events.get(0).type()).isEqualTo(CacheEventPublisher.EventType.INVALIDATE);
++    }
++
++    @Test
++    void lookupShouldNotPublishOnCacheHit() {
++        var publisher = new CacheEventPublisher();
++        var service = createService(publisher);
++        service.lookup("789", Category.CAT08, "user2");
++        var events = new java.util.ArrayList<CacheEventPublisher.CacheEvent>();
++        publisher.subscribe(events::add);
++        service.lookup("789", Category.CAT08, "user2");
++        assertThat(events).isEmpty();
++    }
++}
+diff --git a/src/test/java/nl/example/auth/TokenValidatorTest.java b/src/test/java/nl/example/auth/TokenValidatorTest.java
+--- /dev/null
++++ b/src/test/java/nl/example/auth/TokenValidatorTest.java
+@@ -0,0 +1,30 @@
++package nl.example.auth;
++
++import org.junit.jupiter.api.Test;
++import static org.assertj.core.api.Assertions.assertThat;
++
++class TokenValidatorTest {
++
++    @Test
++    void revokedTokenShouldFailValidation() {
++        var validator = new TokenValidator(mockParser);
++        validator.revokeToken("abc123");
++        assertThat(validator.validate("abc123")).isFalse();
++    }
++
++    @Test
++    void isRevokedShouldReturnTrueForRevokedTokens() {
++        var validator = new TokenValidator(mockParser);
++        validator.revokeToken("xyz");
++        assertThat(validator.isRevoked("xyz")).isTrue();
++    }
++
++    @Test
++    void clearRevocationListShouldRemoveAllRevocations() {
++        var validator = new TokenValidator(mockParser);
++        validator.revokeToken("tok1");
++        validator.revokeToken("tok2");
++        validator.clearRevocationList();
++        assertThat(validator.isRevoked("tok1")).isFalse();
++        assertThat(validator.isRevoked("tok2")).isFalse();
++    }
++}

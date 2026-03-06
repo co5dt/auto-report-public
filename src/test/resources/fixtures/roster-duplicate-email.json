@@ -1,0 +1,11 @@
+{
+  "teams": {
+    "TeamA": {
+      "products": [],
+      "members": [
+        { "name": "First Entry", "email": "duplicate@example.nl", "role": "TE" },
+        { "name": "Second Entry", "email": "DUPLICATE@EXAMPLE.NL", "role": "BE" }
+      ]
+    }
+  }
+}

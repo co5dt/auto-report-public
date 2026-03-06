@@ -1,0 +1,20 @@
+{
+  "teams": {
+    "Team Alpha": {
+      "products": ["MuniApp - BRP"],
+      "members": [
+        {
+          "name": "Chris de Vries",
+          "email": "c.devries@example.nl",
+          "emails": ["c.devries@example.nl", "chris.devries@external.org"],
+          "role": "BE"
+        },
+        {
+          "name": "Martijn Janssen",
+          "email": "m.janssen@example.nl",
+          "role": "TE"
+        }
+      ]
+    }
+  }
+}

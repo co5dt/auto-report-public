@@ -1,0 +1,4 @@
+{"tool_request":{"tool":"read_file","ref":"Foo.java","revision":"branch"}}
+{"vote":"MEDIUM","confidence":0.8,"reasoning":"After reviewing the full file, the change is moderate risk"}
+{"vote":"MEDIUM","confidence":0.7,"reasoning":"moderate domain impact"}
+{"vote":"MEDIUM","confidence":0.75,"reasoning":"test coverage adequate"}

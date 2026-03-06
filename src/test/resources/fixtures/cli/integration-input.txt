@@ -1,0 +1,27 @@
+PROJ-77777
+Bug fix for null pointer in DataSlice layer
+
+- Null check added before calling getSlice()
+- Existing slices remain unaffected
+
+n
+n
+n
+n
+n
+n
+n
+n
+n
+n
+n
+Manually tested on local
+n
+
+
+y
+n
+n
+n
+y
+2.0.0

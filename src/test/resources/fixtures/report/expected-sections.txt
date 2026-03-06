@@ -1,0 +1,16 @@
+# Expected section headers in generated report (in order)
+# Used as assertion anchors by ReportGeneratorTest
+
+# Testrapport
+## Betrokken tickets
+## Wat is er gewijzigd en waarom?
+### Wijzigingen per type
+## Wat wordt geraakt?
+## Acceptatiecriteria
+## Risico-analyse
+**Agent deliberation:**
+## Wat is getest?
+### Handmatig
+### Geautomatiseerd
+## Uitlevering op productie
+## DoD

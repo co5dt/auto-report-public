@@ -1,0 +1,7 @@
+# Expected evidence-gap markers for sparse-input scenario
+# Each line must appear when report is generated from sparseJiraData()
+
+[evidence gap: niet opgegeven]
+[evidence gap: Geen acceptatiecriteria opgegeven]
+[evidence gap: Geen handmatige testomschrijving opgegeven]
+[evidence gap: Geen geautomatiseerde tests gerapporteerd]

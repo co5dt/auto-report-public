@@ -1,0 +1,32 @@
+{
+  "teams": {
+    "Team Alpha": {
+      "products": ["MuniApp - BRP"],
+      "members": [
+        {
+          "name": "Chris de Vries",
+          "email": "c.devries@example.nl",
+          "emails": ["c.devries@example.nl", "chris.devries@external.org"],
+          "role": "BE"
+        },
+        {
+          "name": "Martijn Janssen",
+          "email": "m.janssen@example.nl",
+          "emails": ["m.janssen@example.nl", "martijn@personal.dev"],
+          "role": "TE"
+        }
+      ]
+    },
+    "Team Beta": {
+      "products": ["MuniPortal - Core"],
+      "members": [
+        {
+          "name": "Alice Tester",
+          "email": "a.tester@example.nl",
+          "emails": ["a.tester@example.nl", "alice@freelance.io"],
+          "role": "Tester"
+        }
+      ]
+    }
+  }
+}

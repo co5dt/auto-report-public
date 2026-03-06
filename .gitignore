@@ -1,0 +1,10 @@
+target/
+*.class
+*.jar
+*.log
+.idea/
+*.iml
+.cursor/plans/
+.DS_Store
+dependency-reduced-pom.xml
+quality-report-*.md

@@ -1,0 +1,20 @@
+{
+  "teams": {
+    "TeamA": {
+      "members": [
+        {
+          "name": "Alice",
+          "email": "shared@example.nl",
+          "emails": ["shared@example.nl", "alice@personal.dev"],
+          "role": "BE"
+        },
+        {
+          "name": "Bob",
+          "email": "bob@example.nl",
+          "emails": ["bob@example.nl", "shared@example.nl"],
+          "role": "TE"
+        }
+      ]
+    }
+  }
+}

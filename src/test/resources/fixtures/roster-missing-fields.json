@@ -1,0 +1,9 @@
+{
+  "teams": {
+    "Minimal": {
+      "members": [
+        { "email": "bare@example.nl" }
+      ]
+    }
+  }
+}
